@@ -26,7 +26,7 @@ class Windows:
     SendInput = ctypes.windll.user32.SendInput
 
 
-class KEYBDINPUT(ctypes.Structure):
+class KeyboardInput(ctypes.Structure):
     _fields_ = [
         ("wVk", wintypes.WORD),
         ("wScan", wintypes.WORD),
@@ -35,8 +35,11 @@ class KEYBDINPUT(ctypes.Structure):
         ("dwExtraInfo", wintypes.WPARAM),
     ]
 
+    def __init__(self, key: int, flags: int = 0):
+        super().__init__(key, 0, flags, 0, 0)
 
-class MOUSEINPUT(ctypes.Structure):
+
+class MouseInput(ctypes.Structure):
     _fields_ = [
         ('dx', wintypes.LONG),
         ('dy', wintypes.LONG),
@@ -47,7 +50,7 @@ class MOUSEINPUT(ctypes.Structure):
     ]
 
 
-class HARDWAREINPUT(ctypes.Structure):
+class HardwareInput(ctypes.Structure):
     _fields_ = [
         ('uMsg', wintypes.DWORD),
         ('wParamL', wintypes.WORD),
@@ -55,40 +58,37 @@ class HARDWAREINPUT(ctypes.Structure):
     ]
 
 
-class UNION(ctypes.Union):
-    _fields_ = [('mi', MOUSEINPUT), ('ki', KEYBDINPUT), ('hi', HARDWAREINPUT)]
+class InputUnion(ctypes.Union):
+    _fields_ = [('mi', MouseInput), ('ki', KeyboardInput), ('hi', HardwareInput)]
 
 
-class INPUT(ctypes.Structure):
+class Input(ctypes.Structure):
     _anonymous_ = ['u']
-    _fields_ = [('type', wintypes.DWORD), ('u', UNION)]
+    _fields_ = [('type', wintypes.DWORD), ('u', InputUnion)]
 
+    @classmethod
+    def key_press(cls, key: int) -> Self:
+        self = cls(type=win32con.INPUT_KEYBOARD)
+        self.u.ki = KeyboardInput(key)
+        return self
 
-def make_input(vk, flags=0):
-    ki = KEYBDINPUT()
-    ki.wVk = vk
-    ki.wScan = 0
-    ki.dwFlags = flags
-    ki.time = 0
-    ki.dwExtraInfo = 0
-    inp = INPUT()
-    inp.type = 1  # INPUT_KEYBOARD
-    inp.u.ki = ki
-    return inp
+    @classmethod
+    def key_release(cls, key: int) -> Self:
+        self = cls(type=win32con.INPUT_KEYBOARD)
+        self.u.ki = KeyboardInput(key, win32con.KEYEVENTF_KEYUP)
+        return self
 
 
 def send_ctrl_v():
-    VK_CONTROL = 0x11
-    VK_V = ord('V')
-    KEYEVENTF_KEYUP = 0x0002
+    v_key = ord('V')
 
-    inputs = (INPUT * 4)()
-    inputs[0] = make_input(VK_CONTROL, 0)  # ctrl down
-    inputs[1] = make_input(VK_V, 0)  # v down
-    inputs[2] = make_input(VK_V, KEYEVENTF_KEYUP)  # v up
-    inputs[3] = make_input(VK_CONTROL, KEYEVENTF_KEYUP)  # ctrl up
+    inputs = (Input * 4)()
+    inputs[0] = Input.key_press(win32con.VK_CONTROL)
+    inputs[1] = Input.key_press(v_key)
+    inputs[2] = Input.key_release(v_key)
+    inputs[3] = Input.key_release(win32con.VK_CONTROL)
 
-    n = Windows.SendInput(4, ctypes.byref(inputs), ctypes.sizeof(INPUT))
+    n = Windows.SendInput(4, ctypes.byref(inputs), ctypes.sizeof(Input))
     if n != 4:
         error = ctypes.GetLastError()
         raise OSError(f"SendInput failed: returned {n}, GetLastError={error}")
