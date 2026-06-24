@@ -209,36 +209,75 @@ class Clipboard:
         return header + fragment_prefix + html + fragment_postfix
 
 
-class KeySequence:
-    KEY_MAP = {
+class KeyCombination:
+    key: int
+    modifiers: tuple[int]
+
+    MODIFIER_KEYS = {
         "ctrl": win32con.VK_CONTROL,
         "shift": win32con.VK_SHIFT,
         "alt": win32con.VK_MENU,
         "win": win32con.VK_LWIN,
     }
 
-    def __init__(self, *keycodes: int):
-        self.inputs = self.key_sequence(keycodes)
+    MODIFIERS = {
+        win32con.VK_CONTROL: win32con.MOD_CONTROL,
+        win32con.VK_SHIFT: win32con.MOD_SHIFT,
+        win32con.VK_MENU: win32con.MOD_ALT,
+        win32con.VK_LWIN: win32con.MOD_WIN,
+    }
+
+    def __init__(self, combination: str):
+        self.key, self.modifiers = self.decode(combination)
+
+    def __hash__(self) -> int:
+        return hash(self.keys)
+
+    @property
+    def keys(self) -> tuple[int, ...]:
+        return self.modifiers + (self.key,)
+
+    @property
+    def modifiers_mask(self) -> int:
+        mask = 0
+        for mod in self.modifiers:
+            mask |= self.MODIFIERS.get(mod, 0)
+        return mask
 
     @classmethod
-    def decode(cls, combination: str) -> Self:
-        parts = [item.strip() for item in combination.lower().split("+")]
-        keys = []
-        for part in parts:
-            if part in cls.KEY_MAP:
-                keys.append(cls.KEY_MAP[part])
-            elif len(part) == 1:
-                keys.append(ord(part.upper()))
+    def decode(cls, combination: str) -> tuple[int, tuple[int]]:
+        keys = [key.strip().lower() for key in combination.split("+")]
+        modifiers = []
+        main_key = None
+
+        for key in keys:
+            if len(key) == 1:
+                if not key or not key.isascii():
+                    raise ValueError(f"Invalid key: '{key}'")
+                if main_key is not None:
+                    raise ValueError(f"Multiple non-modifier keys: '{main_key}', '{key.upper()}'")
+                main_key = key.upper()
+            elif key in cls.MODIFIER_KEYS:
+                modifiers.append(cls.MODIFIER_KEYS[key])
             else:
-                raise ValueError(f"Unknown key: {part}")
-        return cls(*keys)
+                raise ValueError(f"Unknown modifier: '{key}'")
+
+        if main_key is None:
+            raise ValueError("No key specified in combination")
+
+        return ord(main_key), tuple(modifiers)
+
+
+class KeySequence:
+    def __init__(self, combination_string: str):
+        self.combination = KeyCombination(combination_string)
 
     @staticmethod
     def keyboard_event(vk: int, flags: int = 0) -> Input:
         return Input(type=win32con.INPUT_KEYBOARD, ki=KeyboardInput(vk, flags))
 
     @classmethod
-    def key_sequence(cls, keycodes: tuple[int, ...]) -> ctypes.Array:
+    def keyboard_event_sequence(cls, keycodes: tuple[int, ...]) -> ctypes.Array:
         n = len(keycodes) * 2
         inputs = (Input * n)()
         for i, vk in enumerate(keycodes):
@@ -248,16 +287,18 @@ class KeySequence:
         return inputs
 
     def apply(self):
-        n = len(self.inputs)
-        sent = Windows.SendInput(n, ctypes.byref(self.inputs), ctypes.sizeof(Input))
+        sequence = self.keyboard_event_sequence(self.combination.keys)
+        n = len(sequence)
+        sent = Windows.SendInput(n, ctypes.byref(sequence), ctypes.sizeof(Input))
         if sent != n:
-            raise OSError(f"SendInput failed: sent {sent}/{n}, error={ctypes.GetLastError()}")
+            error = ctypes.GetLastError()
+            raise OSError(f"SendInput failed: sent {sent}/{n}. Error: {ctypes.FormatError(error)}")
 
 
 def transform_clipboard():
     with Clipboard() as clipboard:
         url = clipboard.get(Clipboard.Format.UNICODE)
-        if str is None or not isinstance(url, str):
+        if url is None or not isinstance(url, str):
             raise ValueError("Clipboard does not contain a URL")
 
         print("Url:", url)
@@ -296,11 +337,13 @@ class HotkeyAgent:
         win32api.SetConsoleCtrlHandler(exit_handler, True)
 
     def register_action(self, combination: str, callback: Callable):
-        hotkey_id = len(self.actions)
-        result = Windows.RegisterHotKey(None, hotkey_id, win32con.MOD_CONTROL | win32con.MOD_ALT, ord('V'))
+        hotkey = KeyCombination(combination)
+        new_hotkey_id = len(self.actions)
+
+        result = Windows.RegisterHotKey(None, new_hotkey_id, hotkey.modifiers_mask, hotkey.key)
         if not result:
-            error_code = ctypes.GetLastError()
-            print(f"Failed to register hotkey. Error code: {error_code}")
+            error = ctypes.GetLastError()
+            print(f"Failed to register hotkey: {ctypes.FormatError(error)}")
             return
 
         self.actions.append(callback)
@@ -315,7 +358,8 @@ class HotkeyAgent:
             Windows.TranslateMessage(ctypes.byref(event))
             Windows.DispatchMessageW(ctypes.byref(event))
 
-    def execute_action(self, action: Callable):
+    @staticmethod
+    def execute_action(action: Callable):
         try:
             action()
         except Exception as e:
@@ -325,7 +369,7 @@ class HotkeyAgent:
 
 def paste_gitlab_mr_link():
     transform_clipboard()
-    KeySequence.decode("Ctrl+V").apply()
+    KeySequence("Ctrl+V").apply()
 
 
 if __name__ == "__main__":
