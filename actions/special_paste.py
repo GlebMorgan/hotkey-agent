@@ -71,47 +71,50 @@ PROJECTS = {
 }
 
 
-def get_project_alias(project_path: str) -> str:
+def get_gitlab_project_alias(project_path: str) -> str:
     for prefix, alias in PROJECTS.items():
         if project_path.startswith(prefix):
             return alias
     return project_path.split("/")[-1]
 
 
-def generate_mr_hyperlink(url: str) -> str:
+def gitlab_mr_link(match: re.Match) -> str:
     """https://gps-gitlab.teltonika.lt/fleet/tms/teltonika-tdf/-/merge_requests/0"""
-
-    GITLAB_MR_PATTERN = re.compile(  # pylint: disable=invalid-name
-        r"https://gps-gitlab.teltonika.lt/(?P<path>.+?)/-/merge_requests/(?P<id>\d+)"
-    )
-
-    match = GITLAB_MR_PATTERN.match(url)
-    if not match:
-        raise ValueError("Not a valid GitLab merge request URL: " + url)
-
-    alias = get_project_alias(match.group("path"))
+    alias = get_gitlab_project_alias(match.group("path"))
     mr_id = match.group("id")
-    return f'<a href="{url}">{alias}/{mr_id}</a>'
+    return f'<a href="{match.group(0)}">{alias}/{mr_id}</a>'
 
 
-def transform_clipboard():
+def jira_link(match: re.Match) -> str:
+    """https://teltonika-telematics.atlassian.net/browse/PRJ-000"""
+    return f'<a href="{match.group(0)}">{match.group("key")}</a>'
+
+
+INPUT_TYPES = {
+    r"https://gps-gitlab.teltonika.lt/(?P<path>.+?)/-/merge_requests/(?P<id>\d+)": gitlab_mr_link,
+    r"https://teltonika-telematics.atlassian.net/browse/(?P<key>[A-Z0-9]+-\d+)": jira_link,
+}
+
+
+def transform(text: str):
+    for pattern, handler in INPUT_TYPES.items():
+        match = re.match(pattern, text)
+        if match:
+            return handler(match)
+    raise ValueError(f"Unsupported input '{repr(text)[:92]}'")
+
+
+def special_paste():
     with Clipboard() as clipboard:
-        url = clipboard.get(Clipboard.Format.UNICODE)
-        if url is None or not isinstance(url, str):
-            raise ValueError("Clipboard does not contain a URL")
+        raw_text = clipboard.get(Clipboard.Format.UNICODE)
 
-        print("Url:", url)
+        if raw_text is None or not isinstance(raw_text, str):
+            raise ValueError("Clipboard does not contain text")
 
-        hyperlink = generate_mr_hyperlink(url)
-        print("Hyperlink:", hyperlink)
+        hyperlink = transform(raw_text)
+        print("Transformed:", hyperlink)
 
         clipboard.set(Clipboard.Format.HTML, hyperlink)
         clipboard.reload()
 
-        html = clipboard.get(Clipboard.Format.HTML)
-        print("HTML:", html)
-
-
-def special_paste():
-    transform_clipboard()
     KeySequence("Ctrl+V").apply()
