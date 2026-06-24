@@ -9,7 +9,7 @@ import re
 
 from ctypes import wintypes
 from enum import Enum
-from typing import Iterator, Self, TypeAlias
+from typing import Callable, Iterator, Self, TypeAlias
 
 import win32api
 import win32clipboard as win32cb
@@ -272,45 +272,63 @@ def transform_clipboard():
         print("HTML:", html)
 
 
-def main():
-    try:
-        transform_clipboard()
-        KeySequence.decode("Ctrl+V").apply()
-    except Exception as e:
-        print(f"Error: {e}")
-        win32api.MessageBeep(win32con.MB_ICONHAND)
+class HotkeyAgent:
+    actions: list[Callable] = []
+
+    def __enter__(self):
+        self.register_console_control_handler()
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        for hotkey_id, action in enumerate(self.actions):
+            Windows.UnregisterHotKey(None, hotkey_id)
+
+    @staticmethod
+    def register_console_control_handler():
+        """Required to handle Ctrl+C event and terminate the script
+        while it is blocked by Windows.GetMessageW() call"""
+        thread_id = Windows.GetCurrentThreadId()
+
+        def exit_handler(ctrl_type):
+            Windows.PostThreadMessageW(thread_id, win32con.WM_QUIT, 0, 0)
+            return True
+
+        win32api.SetConsoleCtrlHandler(exit_handler, True)
+
+    def register_action(self, combination: str, callback: Callable):
+        hotkey_id = len(self.actions)
+        result = Windows.RegisterHotKey(None, hotkey_id, win32con.MOD_CONTROL | win32con.MOD_ALT, ord('V'))
+        if not result:
+            error_code = ctypes.GetLastError()
+            print(f"Failed to register hotkey. Error code: {error_code}")
+            return
+
+        self.actions.append(callback)
+
+    def run(self):
+        event = wintypes.MSG()
+        while Windows.GetMessageW(ctypes.byref(event), None, 0, 0) != 0:
+            event_id = event.wParam
+            if event.message == win32con.WM_HOTKEY and event_id < len(self.actions):
+                print(f"Event {event_id} triggered")
+                self.execute_action(self.actions[event_id])
+            Windows.TranslateMessage(ctypes.byref(event))
+            Windows.DispatchMessageW(ctypes.byref(event))
+
+    def execute_action(self, action: Callable):
+        try:
+            action()
+        except Exception as e:
+            print(f"Error: {e}")
+            win32api.MessageBeep(win32con.MB_ICONHAND)
 
 
-def register_console_control_handler():
-    """Required to handle Ctrl+C event and terminate the script
-    while it is blocked by Windows.GetMessageW() call"""
-
-    thread_id = Windows.GetCurrentThreadId()
-
-    def exit_handler(ctrl_type):
-        Windows.PostThreadMessageW(thread_id, win32con.WM_QUIT, 0, 0)
-        return True
-
-    win32api.SetConsoleCtrlHandler(exit_handler, True)
-
-
-def message_loop():
-    register_console_control_handler()
-
-    HOTKEY_ID = 1
-    if not Windows.RegisterHotKey(None, HOTKEY_ID, win32con.MOD_CONTROL | win32con.MOD_ALT, ord('V')):
-        raise RuntimeError("RegisterHotKey failed")
-    try:
-        msg = wintypes.MSG()
-        while Windows.GetMessageW(ctypes.byref(msg), None, 0, 0) != 0:
-            if msg.message == win32con.WM_HOTKEY and msg.wParam == HOTKEY_ID:
-                print("Ctrl+Alt+V pressed")
-                main()
-            Windows.TranslateMessage(ctypes.byref(msg))
-            Windows.DispatchMessageW(ctypes.byref(msg))
-    finally:
-        Windows.UnregisterHotKey(None, HOTKEY_ID)
+def paste_gitlab_mr_link():
+    transform_clipboard()
+    KeySequence.decode("Ctrl+V").apply()
 
 
 if __name__ == "__main__":
-    message_loop()
+    with HotkeyAgent() as agent:
+        agent.register_action("Ctrl+Alt+V", paste_gitlab_mr_link)
+        agent.run()
