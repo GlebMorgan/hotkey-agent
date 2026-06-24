@@ -24,6 +24,8 @@ class Windows:
     DispatchMessageW = ctypes.windll.user32.DispatchMessageW
     KeyboardEvent = ctypes.windll.user32.keybd_event
     SendInput = ctypes.windll.user32.SendInput
+    PostThreadMessageW = ctypes.windll.user32.PostThreadMessageW
+    GetCurrentThreadId = ctypes.windll.kernel32.GetCurrentThreadId
 
 
 class KeyboardInput(ctypes.Structure):
@@ -279,9 +281,23 @@ def main():
         win32api.MessageBeep(win32con.MB_ICONHAND)
 
 
-def message_loop():
-    HOTKEY_ID = 1
+def register_console_control_handler():
+    """Required to handle Ctrl+C event and terminate the script
+    while it is blocked by Windows.GetMessageW() call"""
 
+    thread_id = Windows.GetCurrentThreadId()
+
+    def exit_handler(ctrl_type):
+        Windows.PostThreadMessageW(thread_id, win32con.WM_QUIT, 0, 0)
+        return True
+
+    win32api.SetConsoleCtrlHandler(exit_handler, True)
+
+
+def message_loop():
+    register_console_control_handler()
+
+    HOTKEY_ID = 1
     if not Windows.RegisterHotKey(None, HOTKEY_ID, win32con.MOD_CONTROL | win32con.MOD_ALT, ord('V')):
         raise RuntimeError("RegisterHotKey failed")
     try:
