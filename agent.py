@@ -79,22 +79,6 @@ class Input(ctypes.Structure):
         return self
 
 
-def send_ctrl_v():
-    v_key = ord('V')
-
-    inputs = (Input * 4)()
-    inputs[0] = Input.key_press(win32con.VK_CONTROL)
-    inputs[1] = Input.key_press(v_key)
-    inputs[2] = Input.key_release(v_key)
-    inputs[3] = Input.key_release(win32con.VK_CONTROL)
-
-    n = Windows.SendInput(4, ctypes.byref(inputs), ctypes.sizeof(Input))
-    if n != 4:
-        error = ctypes.GetLastError()
-        raise OSError(f"SendInput failed: returned {n}, GetLastError={error}")
-    return n
-
-
 PROJECTS = {
     "fleet/tms/teltonika-tdf": "TDF",
     "fleet/tms/apps/telematics-app": "TAPP",
@@ -223,7 +207,7 @@ class Clipboard:
         return header + fragment_prefix + html + fragment_postfix
 
 
-class KeyCombination:
+class KeySequence:
     KEY_MAP = {
         "ctrl": win32con.VK_CONTROL,
         "shift": win32con.VK_SHIFT,
@@ -231,11 +215,11 @@ class KeyCombination:
         "win": win32con.VK_LWIN,
     }
 
-    def __init__(self, combination: str) -> None:
-        self.keys = self.decode_combination(combination)
+    def __init__(self, *keycodes: int):
+        self.inputs = self.key_sequence(keycodes)
 
     @classmethod
-    def decode_combination(cls, combination: str) -> list[int]:
+    def decode(cls, combination: str) -> Self:
         parts = [item.strip() for item in combination.lower().split("+")]
         keys = []
         for part in parts:
@@ -245,13 +229,27 @@ class KeyCombination:
                 keys.append(ord(part.upper()))
             else:
                 raise ValueError(f"Unknown key: {part}")
-        return keys
+        return cls(*keys)
+
+    @staticmethod
+    def keyboard_event(vk: int, flags: int = 0) -> Input:
+        return Input(type=win32con.INPUT_KEYBOARD, ki=KeyboardInput(vk, flags))
+
+    @classmethod
+    def key_sequence(cls, keycodes: tuple[int, ...]) -> ctypes.Array:
+        n = len(keycodes) * 2
+        inputs = (Input * n)()
+        for i, vk in enumerate(keycodes):
+            inputs[i] = cls.keyboard_event(vk)
+        for i, vk in enumerate(reversed(keycodes), len(keycodes)):
+            inputs[i] = cls.keyboard_event(vk, win32con.KEYEVENTF_KEYUP)
+        return inputs
 
     def apply(self):
-        for key in self.keys:
-            Windows.KeyboardEvent(key, 0, 0, 0)
-        for key in reversed(self.keys):
-            Windows.KeyboardEvent(key, 0, win32con.KEYEVENTF_KEYUP, 0)
+        n = len(self.inputs)
+        sent = Windows.SendInput(n, ctypes.byref(self.inputs), ctypes.sizeof(Input))
+        if sent != n:
+            raise OSError(f"SendInput failed: sent {sent}/{n}, error={ctypes.GetLastError()}")
 
 
 def transform_clipboard():
@@ -275,15 +273,13 @@ def transform_clipboard():
 def main():
     try:
         transform_clipboard()
-        # KeyCombination("Ctrl+V").apply()
-        send_ctrl_v()
+        KeySequence.decode("Ctrl+V").apply()
     except Exception as e:
         print(f"Error: {e}")
         win32api.MessageBeep(win32con.MB_ICONHAND)
 
 
 def message_loop():
-    WM_HOTKEY = 0x0312
     HOTKEY_ID = 1
 
     if not Windows.RegisterHotKey(None, HOTKEY_ID, win32con.MOD_CONTROL | win32con.MOD_ALT, ord('V')):
@@ -291,7 +287,7 @@ def message_loop():
     try:
         msg = wintypes.MSG()
         while Windows.GetMessageW(ctypes.byref(msg), None, 0, 0) != 0:
-            if msg.message == WM_HOTKEY and msg.wParam == HOTKEY_ID:
+            if msg.message == win32con.WM_HOTKEY and msg.wParam == HOTKEY_ID:
                 print("Ctrl+Alt+V pressed")
                 main()
             Windows.TranslateMessage(ctypes.byref(msg))
