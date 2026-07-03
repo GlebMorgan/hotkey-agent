@@ -82,12 +82,12 @@ def gitlab_mr_link(match: re.Match) -> str:
     """https://gps-gitlab.teltonika.lt/fleet/tms/teltonika-tdf/-/merge_requests/0"""
     alias = get_gitlab_project_alias(match.group("path"))
     mr_id = match.group("id")
-    return f'<a href="{match.group(0)}">{alias}/{mr_id}</a>'
+    return f'<a href="{match.string}">{alias}/{mr_id}</a>'
 
 
 def jira_link(match: re.Match) -> str:
     """https://teltonika-telematics.atlassian.net/browse/PRJ-000"""
-    return f'<a href="{match.group(0)}">{match.group("key")}</a>'
+    return f'<a href="{match.string}">{match.group("key")}</a>'
 
 
 INPUT_TYPES = {
