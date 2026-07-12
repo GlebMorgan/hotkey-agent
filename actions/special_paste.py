@@ -1,8 +1,8 @@
+from dataclasses import dataclass
 import re
 
 from clipboard import Clipboard
 from keyboard import KeySequence
-
 
 PROJECTS = {
     # T5 Projects
@@ -18,28 +18,23 @@ PROJECTS = {
     "fleet/tms/libraries/extapp-protobuf-communication": "ExtMCU-Proto",
     "fleet/tms/libraries/extmcu-protobuf-communication": "ExtMCU-Proto",
     "fleet/tms/platforms/stm32/stm32g0xx_hal_driver": "STM32-HAL",
-
     # T5 Tools
     "fleet/tms/tools/ci-cd-cfg": "CI-CD",
     "fleet/tms/tools/tms-python-console": "TMS-Console",
     "fleet/tms/tools/gitlab-roulette": "GitLab-Roulette",
     "jan.smolskij/t5-can-functionality-testing": "CAN-Testing",
     "fleet/tms/tools/ag3335-airoha-logging-tool-src": "AG-Logger",
-
     # TCT
     "dotnet/confi/tct": "TCT",
     "fleet/tms/tools/tct-configurations": "TCT-Cfg",
     "fleet/tms/tools/tct-localization": "TCT-Loc",
-
     # Factory
     "fleet/tms/tools/daughterboard-application-testing": "Nightly",
     "fleet/tms/libraries/factory-testing-configurations": "Factory",
     "dotnet/factory/tt-evalon/evalon-testing-configurations": "Evalon-Cfg",
-
     # Protocols
     "fleet/fmb/tetra-protocol": "TETRA",
     "dotnet/fota/fota-protocols": "FOTA",
-
     # FMB6
     "fleet/fmb6/fmb6-firmware": "FMB6",
     "fleet/fmb6/fmb6-bootloader": "FMB6-Bootloader",
@@ -52,19 +47,16 @@ PROJECTS = {
     "fleet/drivers/FLASH_LIB_FM6": "FLASH-LIB",
     "fleet/drivers/axl_hal_fm6": "AXL",
     "fleet/tools/tcp_udp_server": "ServerMain",
-
     # Configurator
     "fleet/fmb/fmb-configurator": "CONF",
     "fleet/fmb/cfg-configurations": "CFG",
     "fleet/fmb/cfg-localization": "LOC",
     "fleet/fmb/fmb-configurator-branding": "Branding",
-
     # FMB
     "fleet/fmb/fmb-firmware": "FMB",
     "fleet/fmb/fmb-fmb6-eq-avl-ids": "FMB-AVLIDs",
     "fleet/fmb/fmb-testtool": "TestTool",
     "fleet/fmb/fmb-docs-teltonika-lt": "FMB-Docs",
-
     # Other
     "gleb.klukach/gk-c-training-workshop-task": "CPP-Workshop",
     "fleet/tools/rnd_script": "RND-Autofill",
@@ -78,16 +70,25 @@ def get_gitlab_project_alias(project_path: str) -> str:
     return project_path.split("/")[-1]
 
 
+@dataclass
+class Hyperlink:
+    url: str
+    text: str
+
+    def as_href(self) -> str:
+        return f'<a href="{self.url}">{self.text}</a>'
+
+
 def gitlab_mr_link(match: re.Match) -> str:
     """https://gps-gitlab.teltonika.lt/fleet/tms/teltonika-tdf/-/merge_requests/0"""
     alias = get_gitlab_project_alias(match.group("path"))
     mr_id = match.group("id")
-    return f'<a href="{match.string}">{alias}/{mr_id}</a>'
+    return f'{alias}/{mr_id}'
 
 
 def jira_link(match: re.Match) -> str:
     """https://teltonika-telematics.atlassian.net/browse/PRJ-000"""
-    return f'<a href="{match.string}">{match.group("key")}</a>'
+    return match.group("key")
 
 
 INPUT_TYPES = {
@@ -96,11 +97,12 @@ INPUT_TYPES = {
 }
 
 
-def transform(text: str):
+def transform(text: str) -> Hyperlink:
     for pattern, handler in INPUT_TYPES.items():
         match = re.match(pattern, text)
         if match:
-            return handler(match)
+            alias = handler(match)
+            return Hyperlink(url=match.string, text=alias)
     raise ValueError(f"Unsupported input '{repr(text)[:92]}'")
 
 
@@ -114,7 +116,8 @@ def special_paste():
         hyperlink = transform(raw_text)
         print("Transformed:", hyperlink)
 
-        clipboard.set(Clipboard.Format.HTML, hyperlink)
+        clipboard.set(Clipboard.Format.HTML, hyperlink.as_href())
+        clipboard.set(Clipboard.Format.TEXT, hyperlink.text)
         clipboard.reload()
 
     KeySequence("Ctrl+V").apply()

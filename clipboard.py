@@ -1,7 +1,7 @@
 from enum import Enum
 from typing import Iterator, Self, TypeAlias
 
-import win32clipboard as win32cb
+import win32clipboard
 import win32con
 
 
@@ -11,17 +11,17 @@ class Clipboard:
     class Format(Enum):
         TEXT = win32con.CF_TEXT
         UNICODE = win32con.CF_UNICODETEXT
-        HTML = win32cb.RegisterClipboardFormat("HTML Format")
+        HTML = win32clipboard.RegisterClipboardFormat("HTML Format")
 
     data: dict[int, Data | None]
 
     def __enter__(self) -> Self:
-        win32cb.OpenClipboard()
+        win32clipboard.OpenClipboard()
         self.load()
         return self
 
     def __exit__(self, *_):
-        win32cb.CloseClipboard()
+        win32clipboard.CloseClipboard()
 
     def load(self):
         self.data = dict(self._iter_formats_())
@@ -37,21 +37,21 @@ class Clipboard:
         self.data[cb_format.value] = data
 
     def reload(self):
-        win32cb.EmptyClipboard()
+        win32clipboard.EmptyClipboard()
         for format_id, data in self.data.items():
             if data is None:
                 continue
             try:
-                win32cb.SetClipboardData(format_id, data)
+                win32clipboard.SetClipboardData(format_id, data)
             except TypeError:
                 continue
 
     @staticmethod
     def _iter_formats_() -> Iterator[tuple[int, Data | None]]:
         format_id = 0
-        while format_id := win32cb.EnumClipboardFormats(format_id):
+        while format_id := win32clipboard.EnumClipboardFormats(format_id):
             try:
-                data = win32cb.GetClipboardData(format_id)
+                data = win32clipboard.GetClipboardData(format_id)
             except TypeError:
                 data = None
             yield (format_id, data)
